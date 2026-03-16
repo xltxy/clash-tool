@@ -1,0 +1,5 @@
+# 在此文件中设置你的订阅链接
+# 格式: SUB_URL=你的订阅转换链接
+# 示例: SUB_URL="https://api.dler.io/sub?target=clash&url=YOUR_SUBSCRIPTION_URL"
+
+SUB_URL="https://api.dler.io/sub?target=clash&url=YOUR_SUBSCRIPTION_URL"
