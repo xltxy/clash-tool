@@ -90,9 +90,9 @@ clash-tool node        # 选择代理组并切换其中节点
 clash-tool mode        # 切换代理模式
 clash-tool sub list    # 列出所有订阅 (带 * 为当前订阅)
 clash-tool sub add <名称> <链接>   # 添加订阅
-clash-tool sub use <序号|名称>    # 切换当前订阅 (不自动更新)
+clash-tool sub use <序号|名称>    # 切换订阅 (立即生效，不联网)
 clash-tool sub del <序号|名称>    # 删除订阅
-clash-tool update      # 更新当前订阅并重载
+clash-tool update      # 重新请求订阅链接并更新节点
 clash-tool status      # 查看当前状态
 clash-tool help        # 显示帮助信息
 clash-tool             # 进入交互菜单
@@ -156,12 +156,15 @@ clash-tool sub add fsc-75c5 "https://example.com/sub/fsc/xxxx"
 # 查看订阅列表 (带 * 为当前订阅)
 clash-tool sub list
 
-# 切换当前订阅 (只切换，不自动下载；执行 clash-tool update 后生效)
+# 切换订阅: 立即启用该订阅的本地节点文件，不联网
 clash-tool sub use fsc-75c5
 clash-tool sub use 1
 
+# 重新请求订阅链接获取最新节点并应用 (每个订阅的本地节点文件存于 ~/.config/clash/configs/)
+clash-tool update
+
 # 每个订阅独立记忆节点选择 (存于 subs/<名称>.nodes.json)，
-# 更新/切换订阅后自动恢复该订阅上次的节点
+# 切换/更新订阅后自动恢复该订阅上次的节点
 
 # 更新当前订阅
 clash-tool sub use 对应名称 或直接运行 update_sub.sh

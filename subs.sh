@@ -4,6 +4,7 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 SUBS_DIR="$SCRIPT_DIR/subs"
 CURRENT_FLAG="$SUBS_DIR/.current"
 LEGACY_CONF="$SCRIPT_DIR/sub_url.conf"
+CACHE_DIR="$HOME/.config/clash/configs"
 
 mkdir -p "$SUBS_DIR"
 
@@ -121,14 +122,20 @@ use_sub() {
         return 0
     fi
     echo "$name" > "$CURRENT_FLAG"
-    echo "当前订阅已切换为: $name"
-    echo "更新订阅后生效: clash-tool update (或交互菜单「更新订阅配置」)"
+    if [ ! -f "$CACHE_DIR/$name.yaml" ]; then
+        echo "已选为当前订阅: $name"
+        echo "该订阅还没有本地节点文件，执行 clash-tool update 联网获取后生效"
+        return 0
+    fi
+    echo "正在切换到订阅 '$name' (使用本地节点文件，不联网)..."
+    echo ""
+    bash "$SCRIPT_DIR/update_sub.sh" local
 }
 
 del_sub() {
     local input=${1:-} name
     name=$(resolve_sub "$input") || die "找不到订阅 '$input'"
-    rm -f "$(sub_file "$name")" "$SUBS_DIR/$name.nodes.json"
+    rm -f "$(sub_file "$name")" "$SUBS_DIR/$name.nodes.json" "$CACHE_DIR/$name.yaml"
     if [ "$(current_name)" = "$name" ]; then
         local next
         next=$(list_names | head -1)
@@ -165,10 +172,10 @@ interactive_menu() {
         list_subs
         echo "--------------------------------------"
         echo ""
-        echo "1. 切换订阅 (更新订阅后生效)"
+        echo "1. 切换订阅 (使用本地节点文件，不联网)"
         echo "2. 添加订阅"
         echo "3. 删除订阅"
-        echo "4. 立即更新当前订阅"
+        echo "4. 更新当前订阅 (重新请求订阅链接)"
         echo "0. 退出"
         echo ""
         echo "--------------------------------------"
@@ -215,7 +222,7 @@ show_help() {
     echo "子命令:"
     echo "  list               列出所有订阅 (带 * 为当前订阅)"
     echo "  add <名称> <链接>  添加订阅"
-    echo "  use <序号|名称>    切换当前订阅 (不自动更新)"
+    echo "  use <序号|名称>    切换订阅 (立即生效，不联网)"
     echo "  del <序号|名称>    删除订阅"
     echo "  current            查看当前订阅"
     echo ""

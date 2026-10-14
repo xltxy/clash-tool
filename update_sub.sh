@@ -16,6 +16,17 @@ fi
 mkdir -p "$SUBS_DIR"
 RUNNING_FILE="$SUBS_DIR/.running"
 
+# remote=联网重新获取当前订阅节点; local=直接启用该订阅的本地节点文件(不联网)
+MODE="${1:-remote}"
+case "$MODE" in
+    remote|local) ;;
+    *)
+        echo "用法: $0 [remote|local]"
+        exit 1
+        ;;
+esac
+CACHE_DIR="$CONFIG_DIR/configs"
+
 # 保存某订阅当前在 Clash 中的节点选择（组名 -> 节点名），存为 subs/<名称>.nodes.json
 # API 不可达时不覆盖旧文件，避免停机时把记忆清掉
 save_selections() {
@@ -63,44 +74,67 @@ PYEOF
 }
 
 echo "======================================"
-echo "       更新订阅配置"
+if [ "$MODE" = "local" ]; then
+    echo "       切换订阅 (本地节点文件)"
+else
+    echo "       更新订阅配置"
+fi
 echo "======================================"
 
-if [ ! -f "$SUB_CONF" ]; then
-    echo "错误: 找不到订阅配置文件"
-    echo ""
-    echo "可用以下任一方式配置订阅:"
-    echo "  1. 添加订阅: clash-tool sub add <名称> <订阅链接>"
-    echo "  2. 旧版方式: 创建 $SCRIPT_DIR/sub_url.conf"
-    exit 1
-fi
+if [ "$MODE" = "remote" ]; then
+    if [ ! -f "$SUB_CONF" ]; then
+        echo "错误: 找不到订阅配置文件"
+        echo ""
+        echo "可用以下任一方式配置订阅:"
+        echo "  1. 添加订阅: clash-tool sub add <名称> <订阅链接>"
+        echo "  2. 旧版方式: 创建 $SCRIPT_DIR/sub_url.conf"
+        exit 1
+    fi
 
-source "$SUB_CONF"
+    source "$SUB_CONF"
 
-if [ -z "$SUB_URL" ] || [ "$SUB_URL" = "https://api.dler.io/sub?target=clash&url=YOUR_SUBSCRIPTION_URL" ]; then
-    echo "错误: 当前订阅 ($SUB_CONF) 未配置订阅链接"
-    echo ""
-    echo "切换订阅: clash-tool sub use <名称>"
-    echo "查看列表: clash-tool sub list"
-    exit 1
+    if [ -z "$SUB_URL" ] || [ "$SUB_URL" = "https://api.dler.io/sub?target=clash&url=YOUR_SUBSCRIPTION_URL" ]; then
+        echo "错误: 当前订阅 ($SUB_CONF) 未配置订阅链接"
+        echo ""
+        echo "切换订阅: clash-tool sub use <名称>"
+        echo "查看列表: clash-tool sub list"
+        exit 1
+    fi
 fi
 
 TEMP_FILE=$(mktemp)
 
-echo "正在下载配置..."
-# 部分机场根据 UA 返回格式：带 clash 的 UA 返回 Clash YAML，否则返回 base64 节点列表
-UA="clash-verge/v1.7.7"
-http_code=$(curl -A "$UA" -s -L -w "%{http_code}" -o "$TEMP_FILE" "$SUB_URL")
+if [ "$MODE" = "local" ]; then
+    if [ -z "$_sub_name" ]; then
+        echo "错误: 本地切换需要 subs/.current 指向一个订阅"
+        rm -f "$TEMP_FILE"
+        exit 1
+    fi
+    CACHE_FILE="$CACHE_DIR/$_sub_name.yaml"
+    if [ ! -f "$CACHE_FILE" ]; then
+        echo "错误: 订阅 '$_sub_name' 还没有本地节点文件，先联网获取一次:"
+        echo "  clash-tool update"
+        rm -f "$TEMP_FILE"
+        exit 1
+    fi
+    echo "使用本地节点文件，不联网: $CACHE_FILE"
+    cp "$CACHE_FILE" "$TEMP_FILE"
+else
+    echo "正在下载配置..."
+    # 部分机场根据 UA 返回格式：带 clash 的 UA 返回 Clash YAML，否则返回 base64 节点列表
+    UA="clash-verge/v1.7.7"
+    http_code=$(curl -A "$UA" -s -L -w "%{http_code}" -o "$TEMP_FILE" "$SUB_URL")
 
-if [ "$http_code" != "200" ]; then
-    # 部分订阅域名无法通过代理访问，回退为直连下载
-    http_code=$(curl --noproxy '*' -A "$UA" -s -L -w "%{http_code}" -o "$TEMP_FILE" "$SUB_URL")
-fi
+    if [ "$http_code" != "200" ]; then
+        # 部分订阅域名无法通过代理访问，回退为直连下载
+        http_code=$(curl --noproxy '*' -A "$UA" -s -L -w "%{http_code}" -o "$TEMP_FILE" "$SUB_URL")
+    fi
 
-if [ "$http_code" != "200" ]; then
-    echo "下载失败: HTTP $http_code"
-    rm -f "$TEMP_FILE"
-    exit 1
+    if [ "$http_code" != "200" ]; then
+        echo "下载失败: HTTP $http_code"
+        rm -f "$TEMP_FILE"
+        exit 1
+    fi
 fi
 
 if [ ! -s "$TEMP_FILE" ]; then
@@ -141,12 +175,18 @@ if ! grep -q "^profile:" "$TEMP_FILE"; then
     sed -i "/^lan-allowed-ips:/i profile:\n    store-selected: true" "$TEMP_FILE"
 fi
 
-# 自定义直连规则：插到 rules 最前，保证优先于订阅自带规则
-if grep -q "^rules:" "$TEMP_FILE"; then
+# 自定义直连规则：插到 rules 最前，保证优先于订阅自带规则（已存在则跳过，避免本地缓存反复打补丁导致重复）
+if grep -q "^rules:" "$TEMP_FILE" && ! grep -q "DOMAIN-SUFFIX,xltxy.top,DIRECT" "$TEMP_FILE"; then
     sed -i "/^rules:/a\    - 'DOMAIN-SUFFIX,xltxy.top,DIRECT'\n    - 'DOMAIN-SUFFIX,cn,DIRECT'\n    - 'DOMAIN-SUFFIX,z.ai,DIRECT'" "$TEMP_FILE"
 fi
 
-# 本次更新会替换正在运行的配置：先把运行中订阅的节点选择存档
+# 联网更新时，把打好补丁的配置存为该订阅的本地节点文件，供本地切换直接使用
+if [ "$MODE" = "remote" ] && [ -n "$_sub_name" ]; then
+    mkdir -p "$CACHE_DIR"
+    cp "$TEMP_FILE" "$CACHE_DIR/$_sub_name.yaml"
+fi
+
+# 本次切换/更新会替换正在运行的配置：先把运行中订阅的节点选择存档
 running_name="$(cat "$RUNNING_FILE" 2>/dev/null)"
 if [ -n "$running_name" ] && [ -n "$_sub_name" ] && [ "$running_name" != "$_sub_name" ]; then
     save_selections "$running_name"
@@ -155,7 +195,11 @@ fi
 mv "$TEMP_FILE" "$CONFIG_FILE"
 
 node_count=$(grep -cE "^[[:space:]]*- (name:|\{ ?name:)" "$CONFIG_FILE" 2>/dev/null || echo "?")
-echo "下载成功，共 $node_count 个节点"
+if [ "$MODE" = "local" ]; then
+    echo "载入成功，共 $node_count 个节点"
+else
+    echo "下载成功，共 $node_count 个节点"
+fi
 
 echo "正在重启 Clash..."
 systemctl --user restart clash
@@ -177,6 +221,10 @@ else
         mv "$CONFIG_FILE.bak" "$CONFIG_FILE"
         systemctl --user restart clash
         echo "已恢复旧配置"
+    fi
+    # 新配置没能启动，连带删掉刚写入的本地节点文件，避免下次本地切换再踩坑
+    if [ "$MODE" = "remote" ] && [ -n "$_sub_name" ]; then
+        rm -f "$CACHE_DIR/$_sub_name.yaml"
     fi
     exit 1
 fi

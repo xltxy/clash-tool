@@ -159,7 +159,7 @@ show_help() {
     echo "  node        选择代理组并切换其中节点"
     echo "  mode        切换代理模式"
     echo "  sub         管理订阅 (list/add/use/del)"
-    echo "  update      更新当前订阅"
+    echo "  update      重新请求订阅链接并更新节点"
     echo "  status      查看当前状态"
     echo "  proxy on    开启系统代理 (自动启动 Clash)"
     echo "  proxy off   关闭系统代理"
