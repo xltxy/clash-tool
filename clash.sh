@@ -60,11 +60,24 @@ check_clash_soft() {
     return 0
 }
 
+show_groups() {
+    curl -s "$API/proxies" 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)['proxies']
+    for name, p in d.items():
+        if name != 'GLOBAL' and 'all' in p:
+            print(name + ': ' + p.get('now', '?'))
+except:
+    pass
+"
+}
+
 show_status() {
     echo "======================================"
     echo "       Clash 状态信息"
     echo "======================================"
-    
+
     mode=$(curl -s "$API/configs" 2>/dev/null | python3 -c "
 import sys, json
 try:
@@ -72,17 +85,11 @@ try:
 except:
     print('Unknown')
 ")
-    
-    node=$(curl -s "$API/proxies/GLOBAL" 2>/dev/null | python3 -c "
-import sys, json
-try:
-    print(json.load(sys.stdin).get('now', 'Unknown'))
-except:
-    print('Unknown')
-")
-    
+
     echo "代理模式: $mode"
-    echo "当前节点: $node"
+    echo ""
+    echo "各代理组当前节点:"
+    show_groups
     echo ""
     
     echo "测试连接..."
@@ -149,9 +156,10 @@ show_help() {
     echo "  stop        停止 Clash 服务"
     echo "  restart     重启 Clash 服务"
     echo "  test        测试所有节点延迟 (并发)"
-    echo "  node        切换代理节点"
+    echo "  node        选择代理组并切换其中节点"
     echo "  mode        切换代理模式"
     echo "  sub         管理订阅 (list/add/use/del)"
+    echo "  update      更新当前订阅"
     echo "  status      查看当前状态"
     echo "  proxy on    开启系统代理 (自动启动 Clash)"
     echo "  proxy off   关闭系统代理"
@@ -179,8 +187,8 @@ interactive_menu() {
         if is_clash_running; then
             echo -e "Clash 服务: \033[32m运行中\033[0m"
             mode=$(curl -s "$API/configs" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode','?'))" 2>/dev/null)
-            node=$(curl -s "$API/proxies/GLOBAL" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('now','?'))" 2>/dev/null)
-            echo "模式: $mode | 节点: $node"
+            echo "模式: $mode"
+            show_groups
         else
             echo -e "Clash 服务: \033[31m已停止\033[0m"
         fi
@@ -272,6 +280,9 @@ case "${1:-}" in
     sub)
         shift
         bash "$SCRIPT_DIR/subs.sh" "$@"
+        ;;
+    update)
+        bash "$SCRIPT_DIR/update_sub.sh"
         ;;
     status)
         check_clash

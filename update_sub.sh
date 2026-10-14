@@ -13,6 +13,54 @@ if [ -f "$SUBS_DIR/.current" ]; then
         SUB_CONF="$SUBS_DIR/$_sub_name.conf"
     fi
 fi
+mkdir -p "$SUBS_DIR"
+RUNNING_FILE="$SUBS_DIR/.running"
+
+# 保存某订阅当前在 Clash 中的节点选择（组名 -> 节点名），存为 subs/<名称>.nodes.json
+# API 不可达时不覆盖旧文件，避免停机时把记忆清掉
+save_selections() {
+    local name=$1 tmp
+    tmp=$(mktemp)
+    if curl -s --max-time 5 "$API/proxies" 2>/dev/null | python3 -c "
+import sys, json
+d = json.load(sys.stdin)['proxies']
+sel = {n: p['now'] for n, p in d.items() if 'all' in p and 'now' in p}
+print(json.dumps(sel, ensure_ascii=False, indent=2))
+" > "$tmp" && [ -s "$tmp" ]; then
+        mv "$tmp" "$SUBS_DIR/$name.nodes.json"
+    fi
+    rm -f "$tmp"
+}
+
+# 恢复某订阅上次的节点选择（组和新节点都存在才恢复）
+apply_selections() {
+    local name=$1 file
+    file="$SUBS_DIR/$name.nodes.json"
+    [ -f "$file" ] || return 0
+    python3 - "$file" <<'PYEOF'
+import sys, json, urllib.parse, urllib.request
+try:
+    sel = json.load(open(sys.argv[1]))
+    d = json.load(urllib.request.urlopen("http://127.0.0.1:9090/proxies", timeout=8))["proxies"]
+    restored = 0
+    for g, node in sel.items():
+        p = d.get(g)
+        if not p or "all" not in p or node not in p["all"] or p.get("now") == node:
+            continue
+        r = urllib.request.Request(
+            "http://127.0.0.1:9090/proxies/" + urllib.parse.quote(g, safe=""),
+            data=json.dumps({"name": node}).encode(),
+            method="PUT",
+            headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(r, timeout=8)
+        print("  已恢复: " + g + " -> " + node)
+        restored += 1
+    if restored == 0:
+        print("  (该订阅无需要恢复的节点选择)")
+except Exception as e:
+    print("  (恢复节点选择失败: %s)" % e)
+PYEOF
+}
 
 echo "======================================"
 echo "       更新订阅配置"
@@ -98,6 +146,12 @@ if grep -q "^rules:" "$TEMP_FILE"; then
     sed -i "/^rules:/a\    - 'DOMAIN-SUFFIX,xltxy.top,DIRECT'\n    - 'DOMAIN-SUFFIX,cn,DIRECT'\n    - 'DOMAIN-SUFFIX,z.ai,DIRECT'" "$TEMP_FILE"
 fi
 
+# 本次更新会替换正在运行的配置：先把运行中订阅的节点选择存档
+running_name="$(cat "$RUNNING_FILE" 2>/dev/null)"
+if [ -n "$running_name" ] && [ -n "$_sub_name" ] && [ "$running_name" != "$_sub_name" ]; then
+    save_selections "$running_name"
+fi
+
 mv "$TEMP_FILE" "$CONFIG_FILE"
 
 node_count=$(grep -cE "^[[:space:]]*- (name:|\{ ?name:)" "$CONFIG_FILE" 2>/dev/null || echo "?")
@@ -109,6 +163,14 @@ sleep 2
 
 if systemctl --user is-active clash >/dev/null 2>&1; then
     echo "重启成功"
+    # 记录正在运行的订阅；换了订阅则恢复它上次的节点选择
+    if [ -n "$_sub_name" ]; then
+        echo "$_sub_name" > "$RUNNING_FILE"
+        if [ -n "$running_name" ] && [ "$running_name" != "$_sub_name" ]; then
+            echo "正在恢复该订阅上次的节点选择..."
+            apply_selections "$_sub_name"
+        fi
+    fi
 else
     echo "重启失败，正在恢复旧配置..."
     if [ -f "$CONFIG_FILE.bak" ]; then
@@ -120,8 +182,17 @@ else
 fi
 
 mode=$(curl -s "$API/configs" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode','?'))" 2>/dev/null)
-node=$(curl -s "$API/proxies/GLOBAL" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('now','?'))" 2>/dev/null)
 echo "代理模式: $mode"
-echo "当前节点: $node"
+echo "各代理组当前节点:"
+curl -s "$API/proxies" 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)['proxies']
+    for name, p in d.items():
+        if name != 'GLOBAL' and 'all' in p:
+            print('  ' + name + ': ' + p.get('now', '?'))
+except:
+    pass
+"
 echo ""
 echo "更新完成!"

@@ -4,7 +4,6 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 SUBS_DIR="$SCRIPT_DIR/subs"
 CURRENT_FLAG="$SUBS_DIR/.current"
 LEGACY_CONF="$SCRIPT_DIR/sub_url.conf"
-API="http://127.0.0.1:9090"
 
 mkdir -p "$SUBS_DIR"
 
@@ -51,52 +50,6 @@ resolve_sub() {
         fi
     fi
     return 1
-}
-
-# 保存某订阅当前在 Clash 中的节点选择（组名 -> 节点名），存为 subs/<名称>.nodes.json
-# API 不可达时不覆盖旧文件，避免停机时把记忆清掉
-save_selections() {
-    local name=$1 tmp
-    tmp=$(mktemp)
-    if curl -s --max-time 5 "$API/proxies" 2>/dev/null | python3 -c "
-import sys, json
-d = json.load(sys.stdin)['proxies']
-sel = {n: p['now'] for n, p in d.items() if 'all' in p and 'now' in p}
-print(json.dumps(sel, ensure_ascii=False, indent=2))
-" > "$tmp" && [ -s "$tmp" ]; then
-        mv "$tmp" "$SUBS_DIR/$name.nodes.json"
-    fi
-    rm -f "$tmp"
-}
-
-# 切换到某订阅后，恢复它上次的节点选择（组和新节点都存在才恢复）
-apply_selections() {
-    local name=$1 file
-    file="$SUBS_DIR/$name.nodes.json"
-    [ -f "$file" ] || return 0
-    python3 - "$file" <<'PYEOF'
-import sys, json, urllib.parse, urllib.request
-try:
-    sel = json.load(open(sys.argv[1]))
-    d = json.load(urllib.request.urlopen("http://127.0.0.1:9090/proxies", timeout=8))["proxies"]
-    restored = 0
-    for g, node in sel.items():
-        p = d.get(g)
-        if not p or "all" not in p or node not in p["all"] or p.get("now") == node:
-            continue
-        r = urllib.request.Request(
-            "http://127.0.0.1:9090/proxies/" + urllib.parse.quote(g, safe=""),
-            data=json.dumps({"name": node}).encode(),
-            method="PUT",
-            headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(r, timeout=8)
-        print("  已恢复: " + g + " -> " + node)
-        restored += 1
-    if restored == 0:
-        print("  (该订阅无需要恢复的节点选择)")
-except Exception as e:
-    print("  (恢复节点选择失败: %s)" % e)
-PYEOF
 }
 
 # 旧版单订阅配置(sub_url.conf)自动迁移到 subs/ 目录
@@ -163,18 +116,13 @@ use_sub() {
     local input=${1:-} name old
     name=$(resolve_sub "$input") || die "找不到订阅 '$input'，用 'clash-tool sub list' 查看序号和名称"
     old=$(current_name)
-    if [ -n "$old" ] && [ "$old" != "$name" ]; then
-        save_selections "$old"
+    if [ "$name" = "$old" ]; then
+        echo "'$name' 已是当前订阅，无需切换"
+        return 0
     fi
     echo "$name" > "$CURRENT_FLAG"
     echo "当前订阅已切换为: $name"
-    echo ""
-    if bash "$SCRIPT_DIR/update_sub.sh"; then
-        echo "正在恢复该订阅上次的节点选择..."
-        apply_selections "$name"
-    else
-        exit 1
-    fi
+    echo "更新订阅后生效: clash-tool update (或交互菜单「更新订阅配置」)"
 }
 
 del_sub() {
@@ -217,7 +165,7 @@ interactive_menu() {
         list_subs
         echo "--------------------------------------"
         echo ""
-        echo "1. 切换订阅 (切换后立即更新)"
+        echo "1. 切换订阅 (更新订阅后生效)"
         echo "2. 添加订阅"
         echo "3. 删除订阅"
         echo "4. 立即更新当前订阅"
@@ -267,7 +215,7 @@ show_help() {
     echo "子命令:"
     echo "  list               列出所有订阅 (带 * 为当前订阅)"
     echo "  add <名称> <链接>  添加订阅"
-    echo "  use <序号|名称>    切换订阅并立即更新"
+    echo "  use <序号|名称>    切换当前订阅 (不自动更新)"
     echo "  del <序号|名称>    删除订阅"
     echo "  current            查看当前订阅"
     echo ""

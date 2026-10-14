@@ -6,7 +6,8 @@
 
 - 系统代理一键开关，新终端自动加载代理设置
 - 节点延迟并发测试，快速筛选最优节点
-- 交互式节点切换和代理模式切换
+- 按代理组切换节点，主面板显示各代理组当前选择
+- 交互式代理模式切换
 - 多订阅管理，添加/切换/删除，更新时只更新当前订阅
 - 每个订阅独立记忆节点选择，切换回来自动恢复
 - 订阅配置更新，自动重载
@@ -85,12 +86,13 @@ clash-tool start       # 启动 Clash 服务
 clash-tool stop        # 停止 Clash 服务
 clash-tool restart     # 重启 Clash 服务
 clash-tool test        # 测试所有节点延迟（并发）
-clash-tool node        # 切换代理节点
+clash-tool node        # 选择代理组并切换其中节点
 clash-tool mode        # 切换代理模式
 clash-tool sub list    # 列出所有订阅 (带 * 为当前订阅)
 clash-tool sub add <名称> <链接>   # 添加订阅
-clash-tool sub use <序号|名称>    # 切换订阅并立即更新
+clash-tool sub use <序号|名称>    # 切换当前订阅 (不自动更新)
 clash-tool sub del <序号|名称>    # 删除订阅
+clash-tool update      # 更新当前订阅并重载
 clash-tool status      # 查看当前状态
 clash-tool help        # 显示帮助信息
 clash-tool             # 进入交互菜单
@@ -154,11 +156,12 @@ clash-tool sub add fsc-75c5 "https://example.com/sub/fsc/xxxx"
 # 查看订阅列表 (带 * 为当前订阅)
 clash-tool sub list
 
-# 切换订阅并立即下载更新、重启 Clash (序号以 sub list 显示为准)
+# 切换当前订阅 (只切换，不自动下载；执行 clash-tool update 后生效)
 clash-tool sub use fsc-75c5
 clash-tool sub use 1
 
-# 切换回来时，会自动恢复该订阅上次的节点选择 (存于 subs/<名称>.nodes.json)
+# 每个订阅独立记忆节点选择 (存于 subs/<名称>.nodes.json)，
+# 更新/切换订阅后自动恢复该订阅上次的节点
 
 # 更新当前订阅
 clash-tool sub use 对应名称 或直接运行 update_sub.sh
