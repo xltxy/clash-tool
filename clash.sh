@@ -151,6 +151,7 @@ show_help() {
     echo "  test        测试所有节点延迟 (并发)"
     echo "  node        切换代理节点"
     echo "  mode        切换代理模式"
+    echo "  sub         管理订阅 (list/add/use/del)"
     echo "  status      查看当前状态"
     echo "  proxy on    开启系统代理 (自动启动 Clash)"
     echo "  proxy off   关闭系统代理"
@@ -194,6 +195,7 @@ interactive_menu() {
         echo "6. 开启系统代理"
         echo "7. 关闭系统代理"
         echo "8. 启动/停止 Clash 服务"
+        echo "9. 管理订阅 (多订阅切换)"
         echo "0. 退出"
         echo ""
         echo "--------------------------------------"
@@ -231,6 +233,9 @@ interactive_menu() {
                     start_clash
                 fi
                 ;;
+            9)
+                bash "$SCRIPT_DIR/subs.sh"
+                ;;
             0|q|Q)
                 echo "再见!"
                 exit 0
@@ -263,6 +268,10 @@ case "${1:-}" in
     mode)
         check_clash
         bash "$SCRIPT_DIR/switch_mode.sh"
+        ;;
+    sub)
+        shift
+        bash "$SCRIPT_DIR/subs.sh" "$@"
         ;;
     status)
         check_clash

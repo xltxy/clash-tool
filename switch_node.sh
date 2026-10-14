@@ -14,31 +14,65 @@ except:
 }
 
 get_nodes() {
-    curl -s "$API/proxies/GLOBAL" 2>/dev/null | python3 -c "
+    curl -s "$API/proxies" 2>/dev/null | python3 -c "
 import sys, json
-try:
-    data = json.load(sys.stdin)
-    for name in data.get('all', []):
-        if name not in ['DIRECT', 'REJECT', 'Proxy']:
+data = json.load(sys.stdin)
+proxies = data.get('proxies', {})
+group_types = {'Selector', 'URLTest', 'Fallback'}
+skip = ('DIRECT', 'REJECT', 'Proxy', 'COMPATIBLE', 'Compatible')
+for name, info in proxies.items():
+    if name in skip:
+        continue
+    if info.get('type') in group_types:
+        continue
+    if info.get('type') in ('Direct', 'Reject', 'Compatible'):
+        continue
+    print(name)
+"
+}
+
+get_switchable_groups() {
+    curl -s "$API/proxies" 2>/dev/null | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for name, info in data.get('proxies', {}).items():
+    if info.get('type') in ('Selector', 'URLTest', 'Fallback'):
+        if 'all' in info:
             print(name)
-except:
-    pass
 "
 }
 
 switch_node() {
     local node="$1"
-    echo "$node" | python3 -c "
-import sys, json, urllib.request
-node = sys.stdin.read().strip()
-data = json.dumps({'name': node}).encode()
-req = urllib.request.Request('$API/proxies/GLOBAL', data=data, method='PUT')
-req.add_header('Content-Type', 'application/json')
-try:
-    urllib.request.urlopen(req, timeout=5)
-except Exception as e:
-    print(f'Error: {e}')
-"
+    get_switchable_groups | python3 -c "
+import sys, json, urllib.request, time
+node = sys.argv[1]
+groups = [g for g in (line.strip() for line in sys.stdin) if g]
+errors = []
+ok = []
+for g in groups:
+    data = json.dumps({'name': node}).encode()
+    req = urllib.request.Request('$API/proxies/' + urllib.parse.quote(g), data=data, method='PUT')
+    req.add_header('Content-Type', 'application/json')
+    def do():
+        return urllib.request.urlopen(req, timeout=10)
+    try:
+        do()
+        ok.append(g)
+    except Exception as e:
+        # URLTest/Fallback groups may report transient 400 right after switch;
+        # retry once after a short pause
+        time.sleep(0.5)
+        try:
+            do()
+            ok.append(g)
+        except Exception as e2:
+            errors.append(f'{g}: {e2}')
+if errors and not ok:
+    print('ALL_FAILED: ' + '; '.join(errors))
+elif errors:
+    print('PARTIAL: ' + '; '.join(errors))
+" "$node"
 }
 
 current=$(get_current_node)
@@ -86,13 +120,27 @@ selected="${nodes[$((choice-1))]}"
 
 result=$(switch_node "$selected")
 
-if [ -n "$result" ]; then
-    echo "切换失败: $result"
+if echo "$result" | grep -q "^ALL_FAILED:"; then
+    echo "切换失败: ${result#ALL_FAILED: }"
     exit 1
+fi
+
+if echo "$result" | grep -q "^PARTIAL:"; then
+    echo "部分组切换失败: ${result#PARTIAL: }"
 fi
 
 echo ""
 echo "已切换到: $selected"
 
 new_current=$(get_current_node)
-echo "当前节点: $new_current"
+echo "当前节点(GLOBAL): $new_current"
+
+groups=$(get_switchable_groups)
+if [ -n "$groups" ]; then
+    echo "所有组状态:"
+    while IFS= read -r g; do
+        [ -z "$g" ] && continue
+        n=$(curl -s "$API/proxies/$g" 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('now','?'))" 2>/dev/null)
+        echo "  $g -> $n"
+    done <<< "$groups"
+fi

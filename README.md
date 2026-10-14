@@ -7,6 +7,8 @@
 - 系统代理一键开关，新终端自动加载代理设置
 - 节点延迟并发测试，快速筛选最优节点
 - 交互式节点切换和代理模式切换
+- 多订阅管理，添加/切换/删除，更新时只更新当前订阅
+- 每个订阅独立记忆节点选择，切换回来自动恢复
 - 订阅配置更新，自动重载
 - Clash 服务管理（启动/停止/重启）
 - 多用户支持，每个用户独立配置
@@ -85,6 +87,10 @@ clash-tool restart     # 重启 Clash 服务
 clash-tool test        # 测试所有节点延迟（并发）
 clash-tool node        # 切换代理节点
 clash-tool mode        # 切换代理模式
+clash-tool sub list    # 列出所有订阅 (带 * 为当前订阅)
+clash-tool sub add <名称> <链接>   # 添加订阅
+clash-tool sub use <序号|名称>    # 切换订阅并立即更新
+clash-tool sub del <序号|名称>    # 删除订阅
 clash-tool status      # 查看当前状态
 clash-tool help        # 显示帮助信息
 clash-tool             # 进入交互菜单
@@ -111,6 +117,7 @@ Clash 服务: 运行中
 6. 开启系统代理
 7. 关闭系统代理
 8. 启动/停止 Clash 服务
+9. 管理订阅 (多订阅切换)
 0. 退出
 ```
 
@@ -119,11 +126,15 @@ Clash 服务: 运行中
 ```
 ~/clash/
 ├── clash.sh          # 主脚本
+├── subs.sh           # 多订阅管理
 ├── test_nodes.sh     # 节点延迟测试（并发）
 ├── switch_node.sh    # 切换代理节点
 ├── switch_mode.sh    # 切换代理模式
-├── update_sub.sh     # 更新订阅配置
-├── sub_url.conf      # 订阅链接配置（不上传）
+├── update_sub.sh     # 更新订阅配置（只更新当前订阅）
+├── subs/             # 订阅列表目录（不上传）
+│   ├── <名称>.conf   # 每个订阅一个文件，内容为 SUB_URL="..."
+│   └── .current      # 当前选中的订阅名称
+├── sub_url.conf      # 旧版订阅链接配置（首次使用时自动迁移到 subs/）
 ├── .gitignore        # Git 忽略文件
 └── README.md
 
@@ -134,19 +145,28 @@ Clash 服务: 运行中
 
 ## 配置订阅
 
-首次使用需要配置订阅链接：
+支持多个订阅，切换后更新订阅时只更新当前选中的那个：
 
 ```bash
-# 编辑订阅配置文件
-nano ~/clash/sub_url.conf
+# 添加订阅
+clash-tool sub add fsc-75c5 "https://example.com/sub/fsc/xxxx"
 
-# 设置你的订阅转换链接
-SUB_URL="https://api.dler.io/sub?target=clash&url=YOUR_SUBSCRIPTION_URL"
+# 查看订阅列表 (带 * 为当前订阅)
+clash-tool sub list
+
+# 切换订阅并立即下载更新、重启 Clash (序号以 sub list 显示为准)
+clash-tool sub use fsc-75c5
+clash-tool sub use 1
+
+# 切换回来时，会自动恢复该订阅上次的节点选择 (存于 subs/<名称>.nodes.json)
+
+# 更新当前订阅
+clash-tool sub use 对应名称 或直接运行 update_sub.sh
 ```
 
-然后运行 `clash-tool` 选择「更新订阅配置」或直接编辑 `~/.config/clash/config.yaml`。
+旧版的 `sub_url.conf` 单订阅配置在首次执行 sub 命令时自动迁移到 `subs/` 目录，无需手动处理。
 
-> 注意：`sub_url.conf` 文件已加入 `.gitignore`，你的订阅链接不会被上传到 GitHub。
+> 注意：`sub_url.conf` 和 `subs/` 已加入 `.gitignore`，你的订阅链接不会被上传到 GitHub。
 
 ## 代理模式说明
 
